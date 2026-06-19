@@ -1,16 +1,114 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Task Manager</title>
+    <title>Cloud Task Manager</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1f2937, #2563eb);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .card {
+            background: white;
+            width: 420px;
+            padding: 30px;
+            border-radius: 18px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+        }
+
+        h1 {
+            text-align: center;
+            color: #1f2937;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #6b7280;
+            margin-bottom: 25px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            font-size: 15px;
+        }
+
+        button {
+            padding: 12px 16px;
+            border: none;
+            border-radius: 10px;
+            background: #2563eb;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-top: 25px;
+        }
+
+        li {
+            background: #f3f4f6;
+            margin-bottom: 10px;
+            padding: 14px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .tag {
+            font-size: 12px;
+            color: white;
+            background: #10b981;
+            padding: 4px 8px;
+            border-radius: 20px;
+        }
+
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }
+    </style>
 </head>
 <body>
 
-<h1>Cloud Native Task Manager</h1>
+<div class="card">
+    <h1>Cloud Task Manager</h1>
+    <p class="subtitle">Flask + Docker + Jenkins + AWS</p>
 
-<input id="task" placeholder="Enter task">
-<button onclick="addTask()">Add Task</button>
+    <div class="input-row">
+        <input id="task" placeholder="Enter a new cloud task">
+        <button onclick="addTask()">Add</button>
+    </div>
 
-<ul id="tasks"></ul>
+    <ul id="tasks"></ul>
+
+    <div class="footer">
+        Deployed automatically to AWS staging environment
+    </div>
+</div>
 
 <script>
 async function loadTasks() {
@@ -20,23 +118,34 @@ async function loadTasks() {
     const list = document.getElementById('tasks');
     list.innerHTML = '';
 
+    if (tasks.length === 0) {
+        list.innerHTML = '<li>No tasks yet <span class="tag">Ready</span></li>';
+        return;
+    }
+
     tasks.forEach(task => {
         const li = document.createElement('li');
-        li.textContent = task.title;
+        li.innerHTML = `
+            <span>${task.title}</span>
+            <span class="tag">Active</span>
+        `;
         list.appendChild(li);
     });
 }
 
 async function addTask() {
-    const task = document.getElementById('task').value;
+    const input = document.getElementById('task');
+    const title = input.value.trim();
+
+    if (!title) return;
 
     await fetch('/tasks', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({title: task})
+        body: JSON.stringify({title})
     });
 
-    document.getElementById('task').value = '';
+    input.value = '';
     loadTasks();
 }
 
