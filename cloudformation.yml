@@ -1,12 +1,71 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Cloud Native Flask App staging environment
+Description: Full Cloud Native Flask App Environment - Jenkins + Staging EC2
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair name
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
 
 Resources:
+
+  AppVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: cloud-native-vpc
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AppVPC
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: cloud-native-public-subnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref AppVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AppVPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
 
   JenkinsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow SSH and Jenkins
+      VpcId: !Ref AppVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -21,6 +80,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow SSH and Flask app
+      VpcId: !Ref AppVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -30,3 +90,70 @@ Resources:
           FromPort: 5000
           ToPort: 5000
           CidrIp: 0.0.0.0/0
+
+  JenkinsServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref JenkinsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: jenkins-server
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt update -y
+          apt install -y openjdk-21-jre git python3 python3-pip python3-venv docker.io curl
+          systemctl enable docker
+          systemctl start docker
+          usermod -aG docker ubuntu
+          curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key | tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+          echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+          apt update -y
+          apt install -y jenkins
+          usermod -aG docker jenkins
+          systemctl enable jenkins
+          systemctl start jenkins
+
+  StagingServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref StagingSecurityGroup
+      Tags:
+        - Key: Name
+          Value: staging-server
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt update -y
+          apt install -y docker.io
+          systemctl enable docker
+          systemctl start docker
+          usermod -aG docker ubuntu
+
+Outputs:
+
+  JenkinsPublicIP:
+    Description: Jenkins server public IP
+    Value: !GetAtt JenkinsServer.PublicIp
+
+  JenkinsURL:
+    Description: Jenkins URL
+    Value: !Sub "http://${JenkinsServer.PublicIp}:8080"
+
+  StagingPublicIP:
+    Description: Staging server public IP
+    Value: !GetAtt StagingServer.PublicIp
+
+  StagingAppURL:
+    Description: Flask app URL after deployment
+    Value: !Sub "http://${StagingServer.PublicIp}:5000"
