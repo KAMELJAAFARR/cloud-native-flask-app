@@ -27,6 +27,11 @@ pipeline {
                 sh './venv/bin/pytest'
             }
         }
+	stage('Integration Tests') {
+    	    steps {
+        	sh './venv/bin/pytest test_integration.py'
+    	    }
+	}
 
         stage('Build Docker Image') {
             steps {
