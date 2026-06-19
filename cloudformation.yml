@@ -1,14 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Full Cloud Native Flask App Environment - Jenkins + Staging EC2
+Description: Cloud Native App Environment - Jenkins and Staging Servers
 
 Parameters:
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Existing EC2 key pair name
 
-  LatestAmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  UbuntuAmiId:
+    Type: String
+    Description: Ubuntu AMI ID
+    Default: ami-YOUR_AMI_ID
 
 Resources:
 
@@ -16,11 +17,6 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.20.0.0/16
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: cloud-native-vpc
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
@@ -28,15 +24,11 @@ Resources:
       VpcId: !Ref AppVPC
       CidrBlock: 10.20.1.0/24
       MapPublicIpOnLaunch: true
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: cloud-native-public-subnet
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
 
-  AttachGateway:
+  GatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref AppVPC
@@ -49,22 +41,22 @@ Resources:
 
   PublicRoute:
     Type: AWS::EC2::Route
-    DependsOn: AttachGateway
+    DependsOn: GatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  SubnetRouteAssociation:
+  RouteAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
 
-  JenkinsSecurityGroup:
+  JenkinsSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH and Jenkins
+      GroupDescription: Jenkins SSH and Web Access
       VpcId: !Ref AppVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -76,10 +68,10 @@ Resources:
           ToPort: 8080
           CidrIp: 0.0.0.0/0
 
-  StagingSecurityGroup:
+  StagingSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH and Flask app
+      GroupDescription: Staging SSH and Flask Access
       VpcId: !Ref AppVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -95,65 +87,31 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.micro
-      ImageId: !Ref LatestAmiId
+      ImageId: !Ref UbuntuAmiId
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds:
-        - !Ref JenkinsSecurityGroup
+        - !Ref JenkinsSG
       Tags:
         - Key: Name
           Value: jenkins-server
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          apt update -y
-          apt install -y openjdk-21-jre git python3 python3-pip python3-venv docker.io curl
-          systemctl enable docker
-          systemctl start docker
-          usermod -aG docker ubuntu
-          curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key | tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-          echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-          apt update -y
-          apt install -y jenkins
-          usermod -aG docker jenkins
-          systemctl enable jenkins
-          systemctl start jenkins
 
   StagingServer:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.micro
-      ImageId: !Ref LatestAmiId
+      ImageId: !Ref UbuntuAmiId
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds:
-        - !Ref StagingSecurityGroup
+        - !Ref StagingSG
       Tags:
         - Key: Name
           Value: staging-server
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          apt update -y
-          apt install -y docker.io
-          systemctl enable docker
-          systemctl start docker
-          usermod -aG docker ubuntu
 
 Outputs:
-
-  JenkinsPublicIP:
-    Description: Jenkins server public IP
+  JenkinsServer:
     Value: !GetAtt JenkinsServer.PublicIp
 
-  JenkinsURL:
-    Description: Jenkins URL
-    Value: !Sub "http://${JenkinsServer.PublicIp}:8080"
-
-  StagingPublicIP:
-    Description: Staging server public IP
+  StagingServer:
     Value: !GetAtt StagingServer.PublicIp
-
-  StagingAppURL:
-    Description: Flask app URL after deployment
-    Value: !Sub "http://${StagingServer.PublicIp}:5000"
